@@ -13,6 +13,7 @@ import {
   CONTRACT_ABI,
 } from "./config";
 import EcoGrid from "./EcoGrid";
+import { useToast } from "./Toast";
 import "./styles.css";
 
 // Wallets available in the Thirdweb connect button
@@ -38,6 +39,7 @@ export default function Faucet({ client: clientProp }) {
   const [reward, setReward] = useState("—");
   const [nextClaim, setNextClaim] = useState("—");
   const [loading, setLoading] = useState(false);
+  const toast = useToast();
 
   const walletAddress = account?.address;
 
@@ -144,7 +146,7 @@ export default function Faucet({ client: clientProp }) {
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        alert("Galxe: " + (err.error || "not eligible"));
+        toast(err.error || "Not eligible yet", "error");
         window.open(GALXE_QUEST_URL, "_blank");
         return;
       }
@@ -158,10 +160,10 @@ export default function Faucet({ client: clientProp }) {
       const tx = await contract.claimAccess(data.attestation, data.signature);
       await tx.wait();
 
-      alert("Access granted!");
+      toast("Access granted! 7 days active.", "success");
       refreshStatus();
     } catch (e) {
-      alert("Error: " + (e.reason || e.message));
+      toast(e.reason || e.message || "Something went wrong", "error");
     } finally {
       setLoading(false);
     }
@@ -179,10 +181,10 @@ export default function Faucet({ client: clientProp }) {
       );
       const tx = await contract.claim();
       await tx.wait();
-      alert("Tokens claimed!");
+      toast("Tokens claimed!", "success");
       refreshStatus();
     } catch (e) {
-      alert("Error: " + (e.reason || e.message));
+      toast(e.reason || e.message || "Something went wrong", "error");
     } finally {
       setLoading(false);
     }

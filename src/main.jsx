@@ -3,9 +3,12 @@ import { createRoot } from "react-dom/client";
 import { ThirdwebProvider } from "thirdweb/react";
 import { client } from "./config";
 import Faucet from "./Faucet";
+import { ToastProvider } from "./Toast";
 
 createRoot(document.getElementById("root")).render(
   <ThirdwebProvider>
-    <Faucet client={client} />
+    <ToastProvider>
+      <Faucet client={client} />
+    </ToastProvider>
   </ThirdwebProvider>
 );
