@@ -76,7 +76,12 @@ export default function Faucet({ client: clientProp }) {
       const bal = await contract.getFaucetBalance();
       const rew = await contract.rewardAmount();
 
-      setStatus({ hasAccess, expiry: Number(expiry), timeLeft: Number(timeLeft) });
+      setStatus({
+        hasAccess,
+        expiry: Number(expiry),
+        timeLeft: Number(timeLeft),
+        canClaimNow: Boolean(canClaimNow),
+      });
       setBalance((Number(BigInt(bal.toString())) / 1e18).toFixed(2) + " HASH");
       setReward((Number(BigInt(rew.toString())) / 1e18).toFixed(2) + " HASH");
 
@@ -113,6 +118,12 @@ export default function Faucet({ client: clientProp }) {
     const m = Math.floor((seconds % 3600) / 60);
     const s = seconds % 60;
     return `${h}h ${m}m ${s}s`;
+  }
+
+  function parseReward(r) {
+    if (!r || r === "—") return "";
+    const n = parseFloat(r);
+    return Number.isFinite(n) ? `${n} HASH` : r;
   }
 
   async function claimAccess() {
@@ -253,24 +264,39 @@ export default function Faucet({ client: clientProp }) {
 
           {walletAddress && (
             <div className="actions">
-              <button className="btn primary" onClick={claimAccess} disabled={loading}>
-                {loading ? "Processing..." : "Sign quest → Get Access"}
-              </button>
-              <button
-                className="btn secondary"
-                onClick={claimTokens}
-                disabled={loading || !status?.hasAccess}
-              >
-                Claim tokens
-              </button>
-              <a
-                className="btn link"
-                href={GALXE_QUEST_URL}
-                target="_blank"
-                rel="noopener"
-              >
-                Open quest on Galxe →
-              </a>
+              {!status?.hasAccess ? (
+                <>
+                  <button
+                    className="btn primary"
+                    onClick={claimAccess}
+                    disabled={loading}
+                  >
+                    {loading
+                      ? "Checking..."
+                      : "Verify quest → Get 7 days"}
+                  </button>
+                  <a
+                    className="btn link"
+                    href={GALXE_QUEST_URL}
+                    target="_blank"
+                    rel="noopener"
+                  >
+                    Jump to quest →
+                  </a>
+                </>
+              ) : (
+                <button
+                  className="btn primary"
+                  onClick={claimTokens}
+                  disabled={loading || !status?.canClaimNow}
+                >
+                  {loading
+                    ? "Processing..."
+                    : status?.canClaimNow
+                    ? `Claim ${parseReward(reward)}`
+                    : `Claim ${parseReward(reward)} in ${nextClaim}`}
+                </button>
+              )}
             </div>
           )}
         </div>
