@@ -39,6 +39,8 @@ export default function Faucet({ client: clientProp }) {
   const [reward, setReward] = useState("—");
   const [nextClaim, setNextClaim] = useState("—");
   const [loading, setLoading] = useState(false);
+  const [tweetLoading, setTweetLoading] = useState(false);
+  const [tweetLock, setTweetLock] = useState("");
   const toast = useToast();
 
   const walletAddress = account?.address;
@@ -111,7 +113,12 @@ export default function Faucet({ client: clientProp }) {
   // Refresh status on wallet change
   useEffect(() => {
     refreshStatus();
-  }, [refreshStatus]);
+    if (walletAddress) {
+      setTweetLock(getTweetLock(walletAddress));
+    } else {
+      setTweetLock("");
+    }
+  }, [refreshStatus, walletAddress]);
 
   function formatTime(seconds) {
     const h = Math.floor(seconds / 3600);
@@ -198,6 +205,68 @@ export default function Faucet({ client: clientProp }) {
       toast(e.reason || e.message || "Something went wrong", "error");
     } finally {
       setLoading(false);
+    }
+  }
+
+  const TWEET_LS_PREFIX = "hf_tweet_lock_";
+  const TWEET_WINDOW_MS = 12 * 60 * 60 * 1000; // 12h client-side gate
+
+  function getTweetLock(addr) {
+    if (!addr) return "";
+    const raw = localStorage.getItem(TWEET_LS_PREFIX + addr.toLowerCase());
+    if (!raw) return "";
+    const ts = Number(raw);
+    const remain = ts + TWEET_WINDOW_MS - Date.now();
+    if (remain <= 0) {
+      localStorage.removeItem(TWEET_LS_PREFIX + addr.toLowerCase());
+      return "";
+    }
+    return formatTime(Math.floor(remain / 1000));
+  }
+
+  async function generateTweet() {
+    if (!walletAddress) return;
+    const lock = getTweetLock(walletAddress);
+    if (lock) {
+      toast("Next tweet available in " + lock, "info");
+      return;
+    }
+    setTweetLoading(true);
+    try {
+      const base = VERIFIER_SERVER.replace(/\/+$/, "");
+      const tweetUrl = base ? base + "/tweet" : "/api/tweet";
+      const res = await fetch(tweetUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userAddress: walletAddress }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast(data.error || "Could not generate tweet", "error");
+        return;
+      }
+      const tweet = data.tweet;
+      localStorage.setItem(
+        TWEET_LS_PREFIX + walletAddress.toLowerCase(),
+        String(Date.now())
+      );
+      setTweetLock(getTweetLock(walletAddress));
+
+      // Copy to clipboard
+      try {
+        await navigator.clipboard.writeText(tweet);
+        toast("Tweet copied — paste it and post it!", "success");
+      } catch {
+        toast(tweet.replace(/\s+/g, " ").slice(0, 90) + "…", "info");
+      }
+      window.open(
+        "https://twitter.com/intent/tweet?text=" + encodeURIComponent(tweet),
+        "_blank"
+      );
+    } catch (e) {
+      toast(e.message || "Something went wrong", "error");
+    } finally {
+      setTweetLoading(false);
     }
   }
 
@@ -298,6 +367,18 @@ export default function Faucet({ client: clientProp }) {
                     : `Claim ${parseReward(reward)} in ${nextClaim}`}
                 </button>
               )}
+
+              <button
+                className="btn secondary"
+                onClick={generateTweet}
+                disabled={tweetLoading}
+              >
+                {tweetLoading
+                  ? "Generating..."
+                  : tweetLock
+                  ? `Tweet again in ${tweetLock}`
+                  : "Generate a tweet 🐦"}
+              </button>
             </div>
           )}
         </div>
