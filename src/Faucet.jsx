@@ -113,21 +113,6 @@ export default function Faucet({ client: clientProp }) {
     return `${h}h ${m}m ${s}s`;
   }
 
-  async function callVerify() {
-    const url =
-      VERIFIER_SERVER.replace(/\/+$/, "") + "/verify" || "/api/verify";
-    const res = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        userAddress: walletAddress,
-        verifyingContract: CONTRACT_ADDRESS,
-        chainId: CHAIN_ID,
-      }),
-    });
-    return res;
-  }
-
   async function claimAccess() {
     if (!walletAddress) return;
     setLoading(true);
@@ -143,7 +128,10 @@ export default function Faucet({ client: clientProp }) {
       const nonce = Number(await contractRead.userNonce(walletAddress));
 
       const base = VERIFIER_SERVER.replace(/\/+$/, "");
-      const res = await fetch((base || "") + "/verify", {
+      // When VERIFIER_SERVER is empty, the backend lives at /api/verify
+      // on the same origin (Vercel serverless function).
+      const verifyUrl = base ? base + "/verify" : "/api/verify";
+      const res = await fetch(verifyUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

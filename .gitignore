@@ -1,6 +1,7 @@
 # ===== Secrets — NEVER commit =====
 .env
-.env.*.local
+.env.*
+.env.vercel
 
 # ===== node_modules =====
 node_modules/
