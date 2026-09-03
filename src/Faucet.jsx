@@ -210,7 +210,7 @@ export default function Faucet({ client: clientProp }) {
               <img src="/logo.webp" alt="Mining Hash" />
             </div>
             <h1>Hash Faucet</h1>
-            <p>7 days access — Claim $HASH for every tweet about the project</p>
+            <p>7 days access — Claim {parseReward(reward)} for every tweet about the project</p>
           </header>
 
           <div className="connect">
@@ -228,15 +228,16 @@ export default function Faucet({ client: clientProp }) {
           </div>
 
           <div className="info-card">
-            <Row label="Address" value={walletAddress ? short(walletAddress) : "—"} />
-            <Row label="Status" value={status?.hasAccess ? "✅ Access" : "❌ None"} />
-            <Row
-              label="Time left"
-              value={status?.hasAccess ? formatTime(status.timeLeft) : "—"}
-            />
-            <Row label="Claim" value={nextClaim} />
+            <div className="row">
+              <span>Status</span>
+              <b className={status?.hasAccess ? "status-on" : "status-off"}>
+                {status?.hasAccess ? "Active" : "Inactive"}
+                {status?.hasAccess && status?.timeLeft > 0 && (
+                  <span className="timer">{formatTime(status.timeLeft)}</span>
+                )}
+              </b>
+            </div>
             <Row label="Faucet balance" value={balance} />
-            <Row label="Reward" value={reward} />
           </div>
 
           {!status?.hasAccess && (
@@ -314,10 +315,6 @@ export default function Faucet({ client: clientProp }) {
       </footer>
     </div>
   );
-}
-
-function short(addr) {
-  return addr.slice(0, 6) + "..." + addr.slice(-4);
 }
 
 function Row({ label, value }) {

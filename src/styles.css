@@ -101,6 +101,25 @@ header p {
   font-weight: 500;
 }
 
+.status-on {
+  color: #2fb96b;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.status-off {
+  color: #e0e0e0;
+}
+.timer {
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  color: #8b93a7;
+  background: #1a1a2e;
+  border: 1px solid #2a2a44;
+  border-radius: 8px;
+  padding: 2px 8px;
+}
+
 .actions {
   display: flex;
   flex-direction: column;
