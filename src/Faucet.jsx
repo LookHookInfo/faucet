@@ -199,7 +199,7 @@ export default function Faucet({ client: clientProp }) {
               <img src="/logo.webp" alt="Mining Hash" />
             </div>
             <h1>Hash Faucet</h1>
-            <p>Claim $HASH — powered by Mining Hash</p>
+            <p>7 days access — Claim $HASH for every tweet about the project</p>
           </header>
 
           <div className="connect">
