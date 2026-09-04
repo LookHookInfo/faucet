@@ -41,6 +41,61 @@ function pickFallback(address) {
   return FALLBACK_TWEETS[h % FALLBACK_TWEETS.length];
 }
 
+// ===== Tweet cooldown + cache (localStorage) =====
+// One free generation every 4 hours per wallet, and the last generated tweet
+// is cached so a user who closed the window by accident still recovers it.
+const TWEET_COOLDOWN_MS = 4 * 60 * 60 * 1000; // 4 hours
+
+function tweetStorageKey(address, kind) {
+  return `hashfaucet:tweet:${kind}:${(address || "anon").toLowerCase()}`;
+}
+
+function readTweetCache(address) {
+  try {
+    const raw = localStorage.getItem(tweetStorageKey(address, "cache"));
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeTweetCache(address, tweet) {
+  try {
+    localStorage.setItem(
+      tweetStorageKey(address, "cache"),
+      JSON.stringify({ tweet, ts: Date.now() })
+    );
+  } catch {}
+}
+
+function readTweetCooldown(address) {
+  try {
+    const raw = localStorage.getItem(tweetStorageKey(address, "cooldown"));
+    return raw ? Number(raw) : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function writeTweetCooldown(address) {
+  try {
+    localStorage.setItem(
+      tweetStorageKey(address, "cooldown"),
+      String(Date.now())
+    );
+  } catch {}
+}
+
+function formatCooldown(msLeft) {
+  const total = Math.max(0, Math.ceil(msLeft / 1000));
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
 // Wallets available in the Thirdweb connect button
 const wallets = [
   createWallet("io.metamask"),
@@ -71,10 +126,40 @@ export default function Faucet({ client: clientProp }) {
   const [copied, setCopied] = useState(false);
   const [tweetTip, setTweetTip] = useState(TWEET_TIPS[0]);
   const [tweetElapsed, setTweetElapsed] = useState(0);
+  const [cooldownLeft, setCooldownLeft] = useState(0);
   const tweetTipIndex = useRef(0);
   const toast = useToast();
 
   const walletAddress = account?.address;
+
+  // Cooldown: refresh remaining time every second while > 0.
+  useEffect(() => {
+    if (!walletAddress) return;
+    const tick = () => {
+      const last = readTweetCooldown(walletAddress);
+      const left = last ? Math.max(0, last + TWEET_COOLDOWN_MS - Date.now()) : 0;
+      setCooldownLeft(left);
+    };
+    tick();
+    const t = setInterval(tick, 1000);
+    return () => clearInterval(t);
+  }, [walletAddress]);
+
+  const hasCachedTweet = Boolean(walletAddress) && Boolean(readTweetCache(walletAddress));
+
+  // Restore a cached tweet (from an accidental close) for the connected wallet.
+  function restoreCachedTweet() {
+    if (!walletAddress) return false;
+    const cached = readTweetCache(walletAddress);
+    if (cached && cached.tweet) {
+      setGeneratedTweet(cached.tweet);
+      setTweetError("");
+      setCopied(false);
+      setTweetModalOpen(true);
+      return true;
+    }
+    return false;
+  }
 
   // Resolve backend URL: empty = same-origin /api/verify (Vercel), else custom
   const apiBase = VERIFIER_SERVER
@@ -253,6 +338,18 @@ export default function Faucet({ client: clientProp }) {
 
   async function generateTweet() {
     if (tweetLoading) return;
+    if (!walletAddress) {
+      toast("Connect your wallet first", "error");
+      return;
+    }
+    if (cooldownLeft > 0) {
+      toast(
+        "You can generate again in " + formatCooldown(cooldownLeft),
+        "info"
+      );
+      return;
+    }
+
     setTweetLoading(true);
     setTweetError("");
     setCopied(false);
@@ -276,9 +373,7 @@ export default function Faucet({ client: clientProp }) {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           signal: controller.signal,
-          body: JSON.stringify({
-            userAddress: walletAddress || "0x0000000000000000000000000000000000000000",
-          }),
+          body: JSON.stringify({ userAddress: walletAddress }),
         });
       } finally {
         clearTimeout(timeout);
@@ -301,12 +396,47 @@ export default function Faucet({ client: clientProp }) {
     // Guarantee a result: if the server failed or returned empty, use a local
     // template. The user ALWAYS gets a usable tweet to copy or publish.
     if (!returnedTweet) {
-      setTweetError((prev) => (prev ? prev + " Using a fallback tweet instead." : "Using a fallback tweet."));
+      setTweetError(
+        (prev) => (prev ? prev + " Using a fallback tweet instead." : "Using a fallback tweet.")
+      );
       returnedTweet = pickFallback(walletAddress);
     }
 
+    // Persist the result and start the 4-hour cooldown (only for the wallet
+    // that generated it), so spam isn't rewarded but accidents are recoverable.
+    writeTweetCache(walletAddress, returnedTweet);
+    writeTweetCooldown(walletAddress);
+    setCooldownLeft(TWEET_COOLDOWN_MS);
+
     setGeneratedTweet(returnedTweet);
     setTweetLoading(false);
+  }
+
+  // Handles the "Generate" click: during cooldown show the cached tweet,
+  // once cooldown expires generate a fresh one.
+  function handleGenerateClick() {
+    if (!walletAddress) {
+      toast("Connect your wallet first", "error");
+      return;
+    }
+    // Within cooldown — no new generation allowed. Show the cached tweet if we
+    // have one, otherwise just tell the user when they can generate again.
+    if (cooldownLeft > 0) {
+      if (restoreCachedTweet()) {
+        toast(
+          "Your saved tweet is shown. New one in " + formatCooldown(cooldownLeft),
+          "info"
+        );
+      } else {
+        toast(
+          "You can generate again in " + formatCooldown(cooldownLeft),
+          "info"
+        );
+      }
+      return;
+    }
+    // Cooldown expired — always generate a fresh tweet.
+    generateTweet();
   }
 
   async function copyTweet() {
@@ -470,7 +600,7 @@ export default function Faucet({ client: clientProp }) {
                 <li>
                   Tweet about the project with{" "}
                   <strong>@HashCoinFarm #hashcoin</strong>{" "}
-                  <a className="link-inline" onClick={generateTweet} href="#">
+                  <a className="link-inline" onClick={handleGenerateClick} href="#">
                     generate
                   </a>
                 </li>
@@ -494,13 +624,32 @@ export default function Faucet({ client: clientProp }) {
               <h3>Tweet about the project</h3>
               <span className="tweet-tags">@HashCoinFarm #hashcoin</span>
             </div>
-            <button
-              className="btn primary"
-              onClick={generateTweet}
-              disabled={tweetLoading}
-            >
-              Generate a tweet
-            </button>
+            {!walletAddress ? (
+              <button className="btn primary" disabled>
+                Connect wallet to generate
+              </button>
+            ) : cooldownLeft > 0 && !hasCachedTweet ? (
+              <button className="btn primary" disabled>
+                Next tweet in {formatCooldown(cooldownLeft)}
+              </button>
+            ) : (
+              <button
+                className="btn primary"
+                onClick={handleGenerateClick}
+                disabled={tweetLoading}
+              >
+                Generate a tweet
+              </button>
+            )}
+            <p className="tweet-limit-note">
+              {walletAddress && cooldownLeft > 0 && hasCachedTweet
+                ? "Your last tweet is saved. New one in " +
+                  formatCooldown(cooldownLeft) +
+                  "."
+                : walletAddress
+                ? "One free generation every 4 hours."
+                : "Connect your wallet to generate."}
+            </p>
           </div>
 
           {walletAddress && (
