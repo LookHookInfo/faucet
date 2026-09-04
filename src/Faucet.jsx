@@ -127,6 +127,7 @@ export default function Faucet({ client: clientProp }) {
   const [tweetTip, setTweetTip] = useState(TWEET_TIPS[0]);
   const [tweetElapsed, setTweetElapsed] = useState(0);
   const [cooldownLeft, setCooldownLeft] = useState(0);
+  const [contractCopied, setContractCopied] = useState(false);
   const tweetTipIndex = useRef(0);
   const toast = useToast();
 
@@ -458,6 +459,17 @@ export default function Faucet({ client: clientProp }) {
     setTweetError("");
   }
 
+  async function copyContract() {
+    try {
+      await navigator.clipboard.writeText(CONTRACT_ADDRESS);
+      setContractCopied(true);
+      toast("Contract address copied!", "success");
+      setTimeout(() => setContractCopied(false), 2000);
+    } catch (e) {
+      toast(CONTRACT_ADDRESS, "info");
+    }
+  }
+
   async function publishTweet() {
     if (!generatedTweet) return;
     window.open(
@@ -591,6 +603,22 @@ export default function Faucet({ client: clientProp }) {
               </b>
             </div>
             <Row label="Faucet balance" value={balance} />
+            <div className="row contract-row">
+              <span>Contract</span>
+              <div className="contract-copy">
+                <code className="contract-address">
+                  {CONTRACT_ADDRESS.slice(0, 8)}…
+                  {CONTRACT_ADDRESS.slice(-6)}
+                </code>
+                <button
+                  className={`contract-btn${contractCopied ? " copied" : ""}`}
+                  onClick={copyContract}
+                  title="Copy contract address"
+                >
+                  {contractCopied ? "Copied" : "Copy"}
+                </button>
+              </div>
+            </div>
           </div>
 
           {!status?.hasAccess && (

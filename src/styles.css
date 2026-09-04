@@ -101,6 +101,52 @@ header p {
   font-weight: 500;
 }
 
+.contract-row {
+  align-items: center;
+}
+
+.contract-copy {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.contract-address {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  color: #cbd5e1;
+  background: #1a1a2e;
+  border: 1px solid #2a2a44;
+  border-radius: 8px;
+  padding: 3px 8px;
+  white-space: nowrap;
+}
+
+.contract-btn {
+  flex-shrink: 0;
+  background: #1d1d2e;
+  border: 1px solid #2a2a3e;
+  color: #e0e0e0;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.contract-btn:hover {
+  border-color: #6366f1;
+  color: #a5b4fc;
+}
+
+.contract-btn.copied {
+  background: #1f7a3d;
+  border-color: #1f7a3d;
+  color: #fff;
+}
+
 .status-on {
   color: #2fb96b;
   display: inline-flex;
@@ -693,6 +739,10 @@ footer {
 @media (max-width: 420px) {
   .eco-grid {
     grid-template-columns: 1fr;
+  }
+  .contract-row {
+    flex-wrap: wrap;
+    gap: 6px;
   }
 }
 
