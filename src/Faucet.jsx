@@ -30,10 +30,10 @@ const TWEET_TIPS = [
 // Guaranteed local fallback tweets — used if the server ever returns an error
 // or an empty result, so the user ALWAYS gets a usable tweet, no matter what.
 const FALLBACK_TWEETS = [
-  `Mining Hash: mine $HASH on Base via NFT gear & staking. Join the Galxe quest and earn rewards free. @HashCoinFarm #hashcoin https://app.galxe.com/quest/bAFdwDecXS6NRWsbYqVAgh`,
-  `Turn engagement into $HASH. Mining Hash mines on-chain with NFT equipment — no hardware. Complete the @HashCoinFarm quest on Galxe. #hashcoin https://app.galxe.com/quest/bAFdwDecXS6NRWsbYqVAgh`,
+  `Mining Hash: mine HASH on Base via NFT gear & staking. Join the Galxe quest and earn rewards free. @HashCoinFarm #hashcoin https://app.galxe.com/quest/bAFdwDecXS6NRWsbYqVAgh`,
+  `Turn engagement into HASH. Mining Hash mines on-chain with NFT equipment — no hardware. Complete the @HashCoinFarm quest on Galxe. #hashcoin https://app.galxe.com/quest/bAFdwDecXS6NRWsbYqVAgh`,
   `A full Web3 mining ecosystem on Base. Join Mining Hash, take the Galxe quest and start earning #hashcoin today. @HashCoinFarm https://app.galxe.com/quest/bAFdwDecXS6NRWsbYqVAgh`,
-  `Own the machine. @HashCoinFarm #hashcoin — mine $HASH on Base, stake NFTs, vote, launch. Free rewards via the Galxe quest. https://app.galxe.com/quest/bAFdwDecXS6NRWsbYqVAgh`,
+  `Own the machine. @HashCoinFarm #hashcoin — mine HASH on Base, stake NFTs, vote, launch. Free rewards via the Galxe quest. https://app.galxe.com/quest/bAFdwDecXS6NRWsbYqVAgh`,
 ];
 
 function pickFallback(address) {
@@ -403,6 +403,10 @@ export default function Faucet({ client: clientProp }) {
       returnedTweet = pickFallback(walletAddress);
     }
 
+    // Never let a "$HASH"-style ticker slip in — the "$" ticker points at a
+    // different project's token, so we always use the plain "HASH" name.
+    returnedTweet = returnedTweet.replace(/\$HASH\b/gi, "HASH");
+
     // Persist the result and start the 4-hour cooldown (only for the wallet
     // that generated it), so spam isn't rewarded but accidents are recoverable.
     writeTweetCache(walletAddress, returnedTweet);
@@ -684,6 +688,14 @@ export default function Faucet({ client: clientProp }) {
             <div className="actions">
               {!status?.hasAccess ? (
                 <>
+                  <a
+                    className="btn link"
+                    href={GALXE_QUEST_URL}
+                    target="_blank"
+                    rel="noopener"
+                  >
+                    Jump to quest →
+                  </a>
                   <button
                     className="btn primary"
                     onClick={claimAccess}
@@ -693,14 +705,6 @@ export default function Faucet({ client: clientProp }) {
                       ? "Checking..."
                       : "Verify quest → Get 7 days"}
                   </button>
-                  <a
-                    className="btn link"
-                    href={GALXE_QUEST_URL}
-                    target="_blank"
-                    rel="noopener"
-                  >
-                    Jump to quest →
-                  </a>
                 </>
               ) : (
                 <button

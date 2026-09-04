@@ -45,7 +45,7 @@ const MANDATORY_HASHTAG = "#hashcoin";
 const PROJECT_KNOWLEDGE = `
 Mining Hash is a Web3 mining ecosystem built on the Base network by the LookHook team.
 - HASH is the native utility token (max supply 10B), contract ownership is renounced (fully decentralized).
-- Mining is fully on-chain: users mine $HASH through NFT mining equipment and staking — no energy-hungry hardware, permissionless for anyone with a Web3 wallet.
+- Mining is fully on-chain: users mine HASH through NFT mining equipment and staking — no energy-hungry hardware, permissionless for anyone with a Web3 wallet.
 - Tokenomics: 80% goes to mining rewards, 10% strategic partners, 10% marketing/community quests & airdrops.
 - Ecosystem products: GemFun (launchpad on a bonding curve, trades in HASH, liquidity auto-migrated to Uniswap at TGE), De-Vote (DAO governance with guaranteed rewards to voters), .hash Name Service (forever on-chain, buy once own for life), Plasma Cat NFT collection, Lock Staking (9% APR), Pager (AI SocialFi content tool).
 - An extensive quest campaign with reward-bearing tasks is live on Galxe — zero initial investment, anyone can accumulate HASH through engagement.
@@ -53,12 +53,12 @@ Mining Hash is a Web3 mining ecosystem built on the Base network by the LookHook
 
 // ===== Local template fallback (used when the AI key is missing or fails) =====
 const TEMPLATES = [
-  `Mining Hash: mine $HASH on Base via NFTs & staking. Join the Galxe quest and earn rewards free. @HashCoinFarm #hashcoin ${GALXE_URL}`,
-  `Turn engagement into $HASH. Mining Hash mines on-chain with NFT gear — no hardware. Complete the @HashCoinFarm quest on Galxe. #hashcoin ${GALXE_URL}`,
-  `A full Web3 mining ecosystem on Base 🚀 Join Mining Hash, take part in the Galxe quest and start earning $HASH today. @HashCoinFarm #hashcoin ${GALXE_URL}`,
-  `Own the machine. @HashCoinFarm #hashcoin — mine $HASH on Base, stake NFTs, vote, launch. Free rewards via the Galxe guest quest. ${GALXE_URL}`,
-  `Web3 mining, reimagined ⛏️ Mining Hash: on-chain NFT mining, DAO, launchpad & AI. Complete the quest on Galxe for free $HASH. @HashCoinFarm #hashcoin ${GALXE_URL}`,
-  `Mining Hash — engaging with rewards. Mine $HASH on Base, unlock quest rewards on Galxe and grow with the community. #hashcoin @HashCoinFarm ${GALXE_URL}`,
+  `Mining Hash: mine HASH on Base via NFTs & staking. Join the Galxe quest and earn rewards free. @HashCoinFarm #hashcoin ${GALXE_URL}`,
+  `Turn engagement into HASH. Mining Hash mines on-chain with NFT gear — no hardware. Complete the @HashCoinFarm quest on Galxe. #hashcoin ${GALXE_URL}`,
+  `A full Web3 mining ecosystem on Base 🚀 Join Mining Hash, take part in the Galxe quest and start earning HASH today. @HashCoinFarm #hashcoin ${GALXE_URL}`,
+  `Own the machine. @HashCoinFarm #hashcoin — mine HASH on Base, stake NFTs, vote, launch. Free rewards via the Galxe guest quest. ${GALXE_URL}`,
+  `Web3 mining, reimagined ⛏️ Mining Hash: on-chain NFT mining, DAO, launchpad & AI. Complete the quest on Galxe for free HASH. @HashCoinFarm #hashcoin ${GALXE_URL}`,
+  `Mining Hash — engaging with rewards. Mine HASH on Base, unlock quest rewards on Galxe and grow with the community. #hashcoin @HashCoinFarm ${GALXE_URL}`,
 ];
 
 // Deterministic pseudo-random tweak so references "unique" tweets differ a bit.
@@ -88,8 +88,15 @@ function fitTweet(text, hardLimit) {
 }
 
 // Ensure every tweet carries the handle, the core hashtag and both links.
+// Also strip any "$HASH"-style ticker references — "$" implies a market ticker
+// that points at a different project's token, so we only ever use the plain
+// "HASH" name.
 function finalizeTweet(text) {
-  let out = (text || "").replace(/\*\*/g, "").replace(/\s+/g, " ").trim();
+  let out = (text || "")
+    .replace(/\*\*/g, "")
+    .replace(/\s+/g, " ")
+    .replace(/\$HASH\b/gi, "HASH")
+    .trim();
   out = fitTweet(out, TWEET_MAX_LEN);
   if (!out.includes(MANDATORY_HANDLE)) out += ` ${MANDATORY_HANDLE}`;
   if (!out.includes(MANDATORY_HASHTAG)) out += ` ${MANDATORY_HASHTAG}`;
@@ -111,6 +118,7 @@ async function generateWithAI(address) {
     "Write ONE short promotional Tweet (well under 280 characters).",
     "Structure it as: a short bold hook/headline, then a one-line mini description from the ecosystem facts, then a clear call-to-action to join the Galxe quest.",
     `You MUST include the exact handle "${MANDATORY_HANDLE}" and hashtag "${MANDATORY_HASHTAG}" with no extra spaces.`,
+    "NEVER write the token with a dollar sign (no $HASH, no $hash). Always write the plain name as HASH or \"the HASH token\".",
     "Add 1-2 relevant extra hashtags (e.g. #Web3 #Base #Mining #DeFi).",
     `Always reference the Galxe quest link: ${GALXE_URL}.`,
     `Rarely reference the faucet link: ${FAUCET_URL}, when it fits naturally.`,
