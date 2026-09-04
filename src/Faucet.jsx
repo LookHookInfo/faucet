@@ -27,6 +27,20 @@ const TWEET_TIPS = [
   "Adding some crypto flair...",
 ];
 
+// Guaranteed local fallback tweets — used if the server ever returns an error
+// or an empty result, so the user ALWAYS gets a usable tweet, no matter what.
+const FALLBACK_TWEETS = [
+  `Mining Hash: mine $HASH on Base via NFT gear & staking. Join the Galxe quest and earn rewards free. @HashCoinFarm #hashcoin https://app.galxe.com/quest/bAFdwDecXS6NRWsbYqVAgh`,
+  `Turn engagement into $HASH. Mining Hash mines on-chain with NFT equipment — no hardware. Complete the @HashCoinFarm quest on Galxe. #hashcoin https://app.galxe.com/quest/bAFdwDecXS6NRWsbYqVAgh`,
+  `A full Web3 mining ecosystem on Base. Join Mining Hash, take the Galxe quest and start earning #hashcoin today. @HashCoinFarm https://app.galxe.com/quest/bAFdwDecXS6NRWsbYqVAgh`,
+  `Own the machine. @HashCoinFarm #hashcoin — mine $HASH on Base, stake NFTs, vote, launch. Free rewards via the Galxe quest. https://app.galxe.com/quest/bAFdwDecXS6NRWsbYqVAgh`,
+];
+
+function pickFallback(address) {
+  const h = (address || "0").split("").reduce((a, c) => a + c.charCodeAt(0), 0);
+  return FALLBACK_TWEETS[h % FALLBACK_TWEETS.length];
+}
+
 // Wallets available in the Thirdweb connect button
 const wallets = [
   createWallet("io.metamask"),
@@ -52,6 +66,8 @@ export default function Faucet({ client: clientProp }) {
   const [loading, setLoading] = useState(false);
   const [tweetLoading, setTweetLoading] = useState(false);
   const [generatedTweet, setGeneratedTweet] = useState("");
+  const [tweetError, setTweetError] = useState("");
+  const [tweetModalOpen, setTweetModalOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [tweetTip, setTweetTip] = useState(TWEET_TIPS[0]);
   const [tweetElapsed, setTweetElapsed] = useState(0);
@@ -238,15 +254,21 @@ export default function Faucet({ client: clientProp }) {
   async function generateTweet() {
     if (tweetLoading) return;
     setTweetLoading(true);
-    setGeneratedTweet("");
+    setTweetError("");
+    setCopied(false);
+    setTweetElapsed(0);
+    setTweetModalOpen(true);
+
+    let returnedTweet = "";
+
     try {
       const base = VERIFIER_SERVER.replace(/\/+$/, "");
       const tweetUrl = base ? base + "/tweet" : "/api/tweet";
 
-      // Hard-fail after 28s so the overlay never hangs forever — the server
-      // falls back to templates quickly, so this only fires on a real outage.
+      // Hard-fail after 20s so the overlay never hangs forever. The server
+      // falls back to templates in ~5s, so this is just a safety net.
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), 28000);
+      const timeout = setTimeout(() => controller.abort(), 20000);
 
       let res;
       try {
@@ -263,25 +285,28 @@ export default function Faucet({ client: clientProp }) {
       }
 
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        toast(data.error || "Could not generate tweet — try again", "error");
-        return;
+      if (res.ok && data.tweet) {
+        returnedTweet = String(data.tweet).trim();
+      } else {
+        setTweetError(data.error || "The server could not generate a tweet.");
       }
-      if (!data.tweet) {
-        toast("No tweet returned — try again", "error");
-        return;
-      }
-      toast("Tweet ready — copy or publish it!", "success");
-      setGeneratedTweet(data.tweet);
     } catch (e) {
       if (e.name === "AbortError") {
-        toast("Timed out — please try again", "error");
+        setTweetError("Timed out — the server took too long.");
       } else {
-        toast(e.message || "Could not reach server — try again", "error");
+        setTweetError(e.message || "Could not reach the server.");
       }
-    } finally {
-      setTweetLoading(false);
     }
+
+    // Guarantee a result: if the server failed or returned empty, use a local
+    // template. The user ALWAYS gets a usable tweet to copy or publish.
+    if (!returnedTweet) {
+      setTweetError((prev) => (prev ? prev + " Using a fallback tweet instead." : "Using a fallback tweet."));
+      returnedTweet = pickFallback(walletAddress);
+    }
+
+    setGeneratedTweet(returnedTweet);
+    setTweetLoading(false);
   }
 
   async function copyTweet() {
@@ -296,12 +321,17 @@ export default function Faucet({ client: clientProp }) {
     }
   }
 
+  function closeTweetModal() {
+    if (tweetLoading) return;
+    setTweetModalOpen(false);
+    setGeneratedTweet("");
+    setTweetError("");
+  }
+
   async function publishTweet() {
     if (!generatedTweet) return;
-    const tweet = generatedTweet;
-    setGeneratedTweet("");
     window.open(
-      "https://twitter.com/intent/tweet?text=" + encodeURIComponent(tweet),
+      "https://twitter.com/intent/tweet?text=" + encodeURIComponent(generatedTweet),
       "_blank",
       "noopener,noreferrer"
     );
@@ -309,24 +339,89 @@ export default function Faucet({ client: clientProp }) {
 
   return (
     <div className="page">
-      {/* Tweet generation overlay */}
-      {tweetLoading && (
-        <div className="tweet-overlay">
-          <div className="tweet-overlay-card">
-            <div className="tweet-overlay-bar">
-              <div className="tweet-overlay-bar-fill" />
-            </div>
-            <div className="tweet-overlay-body">
-              <div className="tweet-overlay-icon">
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M22 4s-.7 2.1-2 3.4c1.6 10-9.4 17.3-18 11.6 2.2.1 4.4-.6 6-2C3 15.5.5 9.6 3 5c2.2 2.6 5.6 4.1 9 4-.9-4.2 4-6.6 7-3.8 1.1 0 3-1.2 3-1.2z" />
-                </svg>
+      {/* Tweet modal — stays open until the user closes it (X) */}
+      {tweetModalOpen && (
+        <div className="tweet-overlay" onClick={closeTweetModal}>
+          <div
+            className="tweet-overlay-card"
+            role="dialog"
+            aria-modal="true"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Close button (disabled while generating) */}
+            <button
+              className="tweet-modal-close"
+              onClick={closeTweetModal}
+              disabled={tweetLoading}
+              title="Close"
+            >
+              ×
+            </button>
+
+            {tweetLoading ? (
+              <div className="tweet-overlay-body">
+                <div className="tweet-overlay-bar">
+                  <div className="tweet-overlay-bar-fill" />
+                </div>
+                <div className="tweet-overlay-icon">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M22 4s-.7 2.1-2 3.4c1.6 10-9.4 17.3-18 11.6 2.2.1 4.4-.6 6-2C3 15.5.5 9.6 3 5c2.2 2.6 5.6 4.1 9 4-.9-4.2 4-6.6 7-3.8 1.1 0 3-1.2 3-1.2z" />
+                  </svg>
+                </div>
+                <div className="tweet-overlay-label">Generating Tweet</div>
+                <div className="tweet-overlay-sub">AI is crafting your message</div>
+                <div className="tweet-overlay-tip">{tweetTip}</div>
+                <div className="tweet-overlay-timer">{tweetElapsed}s elapsed</div>
               </div>
-              <div className="tweet-overlay-label">Generating Tweet</div>
-              <div className="tweet-overlay-sub">AI is crafting your message</div>
-              <div className="tweet-overlay-tip">{tweetTip}</div>
-              <div className="tweet-overlay-timer">{tweetElapsed}s elapsed</div>
-            </div>
+            ) : (
+              <div className="tweet-overlay-body">
+                <div className="tweet-overlay-bar">
+                  <div className="tweet-overlay-bar-fill done" />
+                </div>
+
+                <div className="tweet-modal-head">
+                  <span className="tweet-modal-title">Your tweet</span>
+                  <span
+                    className={
+                      generatedTweet && generatedTweet.length > 280
+                        ? "char-count over"
+                        : "char-count"
+                    }
+                  >
+                    {generatedTweet ? generatedTweet.length + "/280" : ""}
+                  </span>
+                </div>
+
+                {tweetError && (
+                  <div className="tweet-modal-note">
+                    <span className="tweet-modal-note-dot" />
+                    {tweetError}
+                  </div>
+                )}
+
+                <div className="tweet-preview-text">{generatedTweet}</div>
+
+                <div className="tweet-preview-actions">
+                  <button
+                    className={`btn secondary${copied ? " copied" : ""}`}
+                    onClick={copyTweet}
+                  >
+                    {copied ? "Copied!" : "Copy tweet"}
+                  </button>
+                  <button className="btn primary" onClick={publishTweet}>
+                    Publish on X
+                  </button>
+                </div>
+
+                <button
+                  className="regenerate"
+                  onClick={generateTweet}
+                  disabled={tweetLoading}
+                >
+                  Regenerate
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -399,49 +494,13 @@ export default function Faucet({ client: clientProp }) {
               <h3>Tweet about the project</h3>
               <span className="tweet-tags">@HashCoinFarm #hashcoin</span>
             </div>
-            {!generatedTweet && !tweetLoading ? (
-              <button
-                className="btn primary"
-                onClick={generateTweet}
-                disabled={tweetLoading}
-              >
-                Generate a tweet
-              </button>
-            ) : generatedTweet ? (
-              <div className="tweet-preview">
-                <div className="tweet-preview-meta">
-                  <span
-                    className={
-                      generatedTweet.length > 280 ? "char-count over" : "char-count"
-                    }
-                  >
-                    {generatedTweet.length}/280
-                  </span>
-                  <button
-                    className="regenerate"
-                    onClick={generateTweet}
-                    disabled={tweetLoading}
-                  >
-                    Regenerate
-                  </button>
-                </div>
-                <div className="tweet-preview-text">{generatedTweet}</div>
-                <div className="tweet-preview-actions">
-                  <button
-                    className={`btn secondary${copied ? " copied" : ""}`}
-                    onClick={copyTweet}
-                  >
-                    {copied ? "Copied!" : "Copy tweet"}
-                  </button>
-                  <button
-                    className="btn primary"
-                    onClick={publishTweet}
-                  >
-                    Publish on X
-                  </button>
-                </div>
-              </div>
-            ) : null}
+            <button
+              className="btn primary"
+              onClick={generateTweet}
+              disabled={tweetLoading}
+            >
+              Generate a tweet
+            </button>
           </div>
 
           {walletAddress && (
