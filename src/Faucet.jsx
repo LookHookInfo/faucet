@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { ConnectButton, useActiveAccount } from "thirdweb/react";
 import { defineChain } from "thirdweb/chains";
 import { ethers } from "ethers";
@@ -15,6 +15,17 @@ import {
 import EcoGrid from "./EcoGrid";
 import { useToast } from "./Toast";
 import "./styles.css";
+
+const TWEET_TIPS = [
+  "Crafting the perfect words...",
+  "AI is thinking about your project...",
+  "Mixing hashtags with personality...",
+  "Almost ready — polishing the text...",
+  "Your tweet is taking shape...",
+  "Great tweets take a moment...",
+  "Optimizing for 280 characters...",
+  "Adding some crypto flair...",
+];
 
 // Wallets available in the Thirdweb connect button
 const wallets = [
@@ -40,7 +51,11 @@ export default function Faucet({ client: clientProp }) {
   const [nextClaim, setNextClaim] = useState("—");
   const [loading, setLoading] = useState(false);
   const [tweetLoading, setTweetLoading] = useState(false);
-  const [tweetLock, setTweetLock] = useState("");
+  const [generatedTweet, setGeneratedTweet] = useState("");
+  const [copied, setCopied] = useState(false);
+  const [tweetTip, setTweetTip] = useState(TWEET_TIPS[0]);
+  const [tweetElapsed, setTweetElapsed] = useState(0);
+  const tweetTipIndex = useRef(0);
   const toast = useToast();
 
   const walletAddress = account?.address;
@@ -113,12 +128,24 @@ export default function Faucet({ client: clientProp }) {
   // Refresh status on wallet change
   useEffect(() => {
     refreshStatus();
-    if (walletAddress) {
-      setTweetLock(getTweetLock(walletAddress));
-    } else {
-      setTweetLock("");
-    }
   }, [refreshStatus, walletAddress]);
+
+  // Tweet generation tip rotation
+  useEffect(() => {
+    if (!tweetLoading) return;
+    const interval = setInterval(() => {
+      tweetTipIndex.current = (tweetTipIndex.current + 1) % TWEET_TIPS.length;
+      setTweetTip(TWEET_TIPS[tweetTipIndex.current]);
+    }, 2500);
+    return () => clearInterval(interval);
+  }, [tweetLoading]);
+
+  // Tweet elapsed timer
+  useEffect(() => {
+    if (!tweetLoading) { setTweetElapsed(0); return; }
+    const interval = setInterval(() => setTweetElapsed((e) => e + 1), 1000);
+    return () => clearInterval(interval);
+  }, [tweetLoading]);
 
   function formatTime(seconds) {
     const h = Math.floor(seconds / 3600);
@@ -208,70 +235,102 @@ export default function Faucet({ client: clientProp }) {
     }
   }
 
-  const TWEET_LS_PREFIX = "hf_tweet_lock_";
-  const TWEET_WINDOW_MS = 12 * 60 * 60 * 1000; // 12h client-side gate
-
-  function getTweetLock(addr) {
-    if (!addr) return "";
-    const raw = localStorage.getItem(TWEET_LS_PREFIX + addr.toLowerCase());
-    if (!raw) return "";
-    const ts = Number(raw);
-    const remain = ts + TWEET_WINDOW_MS - Date.now();
-    if (remain <= 0) {
-      localStorage.removeItem(TWEET_LS_PREFIX + addr.toLowerCase());
-      return "";
-    }
-    return formatTime(Math.floor(remain / 1000));
-  }
-
   async function generateTweet() {
-    if (!walletAddress) return;
-    const lock = getTweetLock(walletAddress);
-    if (lock) {
-      toast("Next tweet available in " + lock, "info");
-      return;
-    }
+    if (tweetLoading) return;
     setTweetLoading(true);
+    setGeneratedTweet("");
     try {
       const base = VERIFIER_SERVER.replace(/\/+$/, "");
       const tweetUrl = base ? base + "/tweet" : "/api/tweet";
-      const res = await fetch(tweetUrl, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userAddress: walletAddress }),
-      });
+
+      // Hard-fail after 28s so the overlay never hangs forever — the server
+      // falls back to templates quickly, so this only fires on a real outage.
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 28000);
+
+      let res;
+      try {
+        res = await fetch(tweetUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
+          body: JSON.stringify({
+            userAddress: walletAddress || "0x0000000000000000000000000000000000000000",
+          }),
+        });
+      } finally {
+        clearTimeout(timeout);
+      }
+
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        toast(data.error || "Could not generate tweet", "error");
+        toast(data.error || "Could not generate tweet — try again", "error");
         return;
       }
-      const tweet = data.tweet;
-      localStorage.setItem(
-        TWEET_LS_PREFIX + walletAddress.toLowerCase(),
-        String(Date.now())
-      );
-      setTweetLock(getTweetLock(walletAddress));
-
-      // Copy to clipboard
-      try {
-        await navigator.clipboard.writeText(tweet);
-        toast("Tweet copied — paste it and post it!", "success");
-      } catch {
-        toast(tweet.replace(/\s+/g, " ").slice(0, 90) + "…", "info");
+      if (!data.tweet) {
+        toast("No tweet returned — try again", "error");
+        return;
       }
-      window.open(
-        "https://twitter.com/intent/tweet?text=" + encodeURIComponent(tweet),
-        "_blank"
-      );
+      toast("Tweet ready — copy or publish it!", "success");
+      setGeneratedTweet(data.tweet);
     } catch (e) {
-      toast(e.message || "Something went wrong", "error");
+      if (e.name === "AbortError") {
+        toast("Timed out — please try again", "error");
+      } else {
+        toast(e.message || "Could not reach server — try again", "error");
+      }
     } finally {
       setTweetLoading(false);
     }
   }
 
+  async function copyTweet() {
+    if (!generatedTweet) return;
+    try {
+      await navigator.clipboard.writeText(generatedTweet);
+      setCopied(true);
+      toast("Tweet copied to clipboard!", "success");
+      setTimeout(() => setCopied(false), 2000);
+    } catch (e) {
+      toast(generatedTweet.replace(/\s+/g, " ").slice(0, 90) + "…", "info");
+    }
+  }
+
+  async function publishTweet() {
+    if (!generatedTweet) return;
+    const tweet = generatedTweet;
+    setGeneratedTweet("");
+    window.open(
+      "https://twitter.com/intent/tweet?text=" + encodeURIComponent(tweet),
+      "_blank",
+      "noopener,noreferrer"
+    );
+  }
+
   return (
     <div className="page">
+      {/* Tweet generation overlay */}
+      {tweetLoading && (
+        <div className="tweet-overlay">
+          <div className="tweet-overlay-card">
+            <div className="tweet-overlay-bar">
+              <div className="tweet-overlay-bar-fill" />
+            </div>
+            <div className="tweet-overlay-body">
+              <div className="tweet-overlay-icon">
+                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M22 4s-.7 2.1-2 3.4c1.6 10-9.4 17.3-18 11.6 2.2.1 4.4-.6 6-2C3 15.5.5 9.6 3 5c2.2 2.6 5.6 4.1 9 4-.9-4.2 4-6.6 7-3.8 1.1 0 3-1.2 3-1.2z" />
+                </svg>
+              </div>
+              <div className="tweet-overlay-label">Generating Tweet</div>
+              <div className="tweet-overlay-sub">AI is crafting your message</div>
+              <div className="tweet-overlay-tip">{tweetTip}</div>
+              <div className="tweet-overlay-timer">{tweetElapsed}s elapsed</div>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="container">
         <div className="card">
           <header>
@@ -315,7 +374,10 @@ export default function Faucet({ client: clientProp }) {
               <ol>
                 <li>
                   Tweet about the project with{" "}
-                  <strong>@HashCoinFarm #hashcoin</strong>
+                  <strong>@HashCoinFarm #hashcoin</strong>{" "}
+                  <a className="link-inline" onClick={generateTweet} href="#">
+                    generate
+                  </a>
                 </li>
                 <li>
                   Complete the quest on <strong>Galxe</strong> →{" "}
@@ -331,6 +393,56 @@ export default function Faucet({ client: clientProp }) {
               </p>
             </div>
           )}
+
+          <div className="tweet-section">
+            <div className="tweet-section-head">
+              <h3>Tweet about the project</h3>
+              <span className="tweet-tags">@HashCoinFarm #hashcoin</span>
+            </div>
+            {!generatedTweet && !tweetLoading ? (
+              <button
+                className="btn primary"
+                onClick={generateTweet}
+                disabled={tweetLoading}
+              >
+                Generate a tweet
+              </button>
+            ) : generatedTweet ? (
+              <div className="tweet-preview">
+                <div className="tweet-preview-meta">
+                  <span
+                    className={
+                      generatedTweet.length > 280 ? "char-count over" : "char-count"
+                    }
+                  >
+                    {generatedTweet.length}/280
+                  </span>
+                  <button
+                    className="regenerate"
+                    onClick={generateTweet}
+                    disabled={tweetLoading}
+                  >
+                    Regenerate
+                  </button>
+                </div>
+                <div className="tweet-preview-text">{generatedTweet}</div>
+                <div className="tweet-preview-actions">
+                  <button
+                    className={`btn secondary${copied ? " copied" : ""}`}
+                    onClick={copyTweet}
+                  >
+                    {copied ? "Copied!" : "Copy tweet"}
+                  </button>
+                  <button
+                    className="btn primary"
+                    onClick={publishTweet}
+                  >
+                    Publish on X
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </div>
 
           {walletAddress && (
             <div className="actions">
@@ -367,18 +479,6 @@ export default function Faucet({ client: clientProp }) {
                     : `Claim ${parseReward(reward)} in ${nextClaim}`}
                 </button>
               )}
-
-              <button
-                className="btn secondary"
-                onClick={generateTweet}
-                disabled={tweetLoading}
-              >
-                {tweetLoading
-                  ? "Generating..."
-                  : tweetLock
-                  ? `Tweet again in ${tweetLock}`
-                  : "Generate a tweet 🐦"}
-              </button>
             </div>
           )}
         </div>

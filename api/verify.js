@@ -175,8 +175,16 @@ export default async function handler(req, res) {
     res.setHeader("Allow", "POST");
     return res.status(405).json({ error: "Method not allowed" });
   }
+  let body = req.body;
+  if (typeof body === "string") {
+    try {
+      body = JSON.parse(body);
+    } catch (err) {
+      body = {};
+    }
+  }
   try {
-    const result = await handle(req.body || {});
+    const result = await handle(body || {});
     return res.status(result.status).json(result.body);
   } catch (error) {
     console.error("Unhandled error:", error);

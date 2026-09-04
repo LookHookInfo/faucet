@@ -1,38 +1,67 @@
 /**
  * Serverless tweet generator for the Hash Faucet — Vercel Function.
  *
- * Generates a unique promotional tweet about Mining Hash / Hash Faucet
- * that always includes the mandatory @HashCoinFarm handle and the
- * #hashcoin hashtag, plus a link to the faucet.
+ * Generates a unique, content-rich promotional tweet about the Mining Hash
+ * ecosystem. Every tweet is forced to fit Twitter's character limit and always
+ * includes:
+ *   - the mandatory handle      @HashCoinFarm
+ *   - the main hashtag          #hashcoin (plus a couple of relevant ones)
+ *   - the Galxe quest link       https://app.galxe.com/quest/bAFdwDecXS6NRWsbYqVAgh
+ *   - the faucet link            https://faucet.lookhook.info
  *
  * Deployed as: /api/tweet
  * Local dev:   node api/tweet.js  (Express fallback on port 3002)
  *
  * Required env:
  *   ANYMODEL_API_KEY           — key for the AI generator (Anymodel / OpenAI-compatible)
- *   TWITTER_RATE_LIMIT_REQ     — max generations per window (default 1)
- *   TWITTER_RATE_WINDOW_MS     — window length (default 12h in ms)
+ *
+ * Optional env:
+ *   ANYMODEL_URL               — AI base chat/completions endpoint
+ *   ANYMODEL_MODEL             — model id (default ag/gemini-2.5-flash)
+ *   AI_TIMEOUT_MS              — how long to wait for the AI before falling back (default 5s)
+ *   TWEET_MAX_LEN              — hard character limit for the final tweet (default 270)
  */
 
+// Cap how long this function may run. Vercel Hobby defaults to 10s for this
+// framework; keep well under so a slow AI call always returns something fast
+// (we fall back to curated templates rather than time out at the edge).
+export const config = { maxDuration: 30 };
+
 const AI_KEY = process.env.ANYMODEL_API_KEY;
-const AI_URL = "https://api.anymodel.org/v1/chat/completions";
+const AI_URL =
+  process.env.ANYMODEL_URL || "https://anymodel.org/v1/chat/completions";
 const AI_MODEL = process.env.ANYMODEL_MODEL || "ag/gemini-2.5-flash";
 const FAUCET_URL = process.env.FAUCET_URL || "https://faucet.lookhook.info";
+const GALXE_URL =
+  process.env.GALXE_QUEST_URL ||
+  "https://app.galxe.com/quest/bAFdwDecXS6NRWsbYqVAgh";
+const TWEET_MAX_LEN = Number(process.env.TWEET_MAX_LEN || 270);
+const AI_TIMEOUT_MS = Number(process.env.AI_TIMEOUT_MS || 5000);
 
-const MANDATORY_TAGS = "@HashCoinFarm #hashcoin";
+const MANDATORY_HANDLE = "@HashCoinFarm";
+const MANDATORY_HASHTAG = "#hashcoin";
 
-// In-memory rate limit keyed by lowercase address + IP.
-// NOTE: Vercel functions are ephemeral; this is a soft extra guard on top of
-// the client-side localStorage gate. It resets on function re-spin.
-const hits = new Map();
-const RATE_LIMIT_REQ = Number(
-  process.env.TWITTER_RATE_LIMIT_REQ || 1
-);
-const RATE_WINDOW_MS = Number(
-  process.env.TWITTER_RATE_WINDOW_MS || 12 * 60 * 60 * 1000 // 12 hours
-);
+// ===== Project knowledge fed to the model (from the Mining Hash article) =====
+const PROJECT_KNOWLEDGE = `
+Mining Hash is a Web3 mining ecosystem built on the Base network by the LookHook team.
+- HASH is the native utility token (max supply 10B), contract ownership is renounced (fully decentralized).
+- Mining is fully on-chain: users mine $HASH through NFT mining equipment and staking — no energy-hungry hardware, permissionless for anyone with a Web3 wallet.
+- Tokenomics: 80% goes to mining rewards, 10% strategic partners, 10% marketing/community quests & airdrops.
+- Ecosystem products: GemFun (launchpad on a bonding curve, trades in HASH, liquidity auto-migrated to Uniswap at TGE), De-Vote (DAO governance with guaranteed rewards to voters), .hash Name Service (forever on-chain, buy once own for life), Plasma Cat NFT collection, Lock Staking (9% APR), Pager (AI SocialFi content tool).
+- An extensive quest campaign with reward-bearing tasks is live on Galxe — zero initial investment, anyone can accumulate HASH through engagement.
+`;
 
-// Deterministic pseudo-random tweak so two "unique" tweets differ a bit.
+// ===== Local template fallback (used when the AI key is missing or fails) =====
+const TEMPLATES = [
+  `Mining Hash: mine $HASH on Base via NFTs & staking. Join the Galxe quest and earn rewards free. @HashCoinFarm #hashcoin ${GALXE_URL}`,
+  `Turn engagement into $HASH. Mining Hash mines on-chain with NFT gear — no hardware. Complete the @HashCoinFarm quest on Galxe. #hashcoin ${GALXE_URL}`,
+  `A full Web3 mining ecosystem on Base 🚀 Join Mining Hash, take part in the Galxe quest and start earning $HASH today. @HashCoinFarm #hashcoin ${GALXE_URL}`,
+  `Own the machine. @HashCoinFarm #hashcoin — mine $HASH on Base, stake NFTs, vote, launch. Free rewards via the Galxe guest quest. ${GALXE_URL}`,
+  `Web3 mining, reimagined ⛏️ Mining Hash: on-chain NFT mining, DAO, launchpad & AI. Complete the quest on Galxe for free $HASH. @HashCoinFarm #hashcoin ${GALXE_URL}`,
+  `Mining Hash — engaging with rewards. Mine $HASH on Base, unlock quest rewards on Galxe and grow with the community. #hashcoin @HashCoinFarm ${GALXE_URL}`,
+];
+
+// Deterministic pseudo-random tweak so references "unique" tweets differ a bit.
 function stableHash(str) {
   let h = 2166136261;
   for (let i = 0; i < str.length; i++) {
@@ -42,16 +71,32 @@ function stableHash(str) {
   return Math.abs(h);
 }
 
-// Local template library — used as a fallback when the AI key is missing
-// or the AI call fails, so the feature still works and never drains tokens.
-const TEMPLATES = [
-  `Free $HASH every day! Complete the @HashCoinFarm #hashcoin quest and claim 20 $HASH daily on the Mining Hash faucet 👉 ${FAUCET_URL}`,
-  `Build the future of mining. Join @HashCoinFarm #hashcoin — verify a tweet, get 7 days of faucet access and claim free $HASH ${FAUCET_URL}`,
-  `Mining Hash gives back to its community 🚀 Tweet about the project, unlock the faucet and claim $HASH daily. @HashCoinFarm #hashcoin ${FAUCET_URL}`,
-  `Your daily $HASH is waiting 💎 Complete the @HashCoinFarm #hashcoin quest on Mining Hash and start claiming rewards today ${FAUCET_URL}`,
-  `Turn a single tweet into 7 days of rewards ⛏️ Claim free $HASH every 24h on the Mining Hash faucet. @HashCoinFarm #hashcoin ${FAUCET_URL}`,
-  `Mining Hash — engaging with rewards. Tweet, unlock, and earn $HASH daily. @HashCoinFarm #hashcoin ${FAUCET_URL}`,
-];
+// ===== Character budget =====
+// Build a tweet that fits under TWEET_MAX_LEN by trimming from the tail
+// at a word boundary (keeps the mandatory tags + links intact).
+function fitTweet(text, hardLimit) {
+  let clean = (text || "").replace(/\s+/g, " ").trim();
+  if (clean.length <= hardLimit) return clean;
+
+  // Cut to a whole-word prefix, leaving room for nothing (no suffixes needed —
+  // mandatory tags/links are appended below if missing, but they are usually
+  // already present, so we trim to the hard limit directly).
+  let cut = clean.slice(0, hardLimit);
+  const lastSpace = cut.lastIndexOf(" ");
+  if (lastSpace > hardLimit * 0.6) cut = cut.slice(0, lastSpace);
+  return cut.replace(/[.,;:!? ]+$/, "").trim();
+}
+
+// Ensure every tweet carries the handle, the core hashtag and both links.
+function finalizeTweet(text) {
+  let out = (text || "").replace(/\*\*/g, "").replace(/\s+/g, " ").trim();
+  out = fitTweet(out, TWEET_MAX_LEN);
+  if (!out.includes(MANDATORY_HANDLE)) out += ` ${MANDATORY_HANDLE}`;
+  if (!out.includes(MANDATORY_HASHTAG)) out += ` ${MANDATORY_HASHTAG}`;
+  if (!out.includes(GALXE_URL)) out += ` Join the quest: ${GALXE_URL}`;
+  if (!out.includes(FAUCET_URL)) out += ` ${FAUCET_URL}`;
+  return fitTweet(out.trim(), TWEET_MAX_LEN);
+}
 
 // ===== AI generation =====
 async function generateWithAI(address) {
@@ -59,22 +104,37 @@ async function generateWithAI(address) {
     return null; // no key -> fall back to templates
   }
 
-  const userHint = `user address ${address.slice(0, 6)}...${address.slice(-4)}`;
-  const prompt = `Write a short, natural promotional tweet (max 100 words) about the Mining Hash project and its Hash Faucet. It must include the exact handle "@HashCoinFarm" and hashtag "#hashcoin" without any extra spaces. Mention that users can claim 20 $HASH daily after tweeting about the project. Reference the faucet link: ${FAUCET_URL}. Use a friendly, crypto-enthusiastic tone. Include an emoji or two. Output only the tweet text, no quotation marks. Tweak: ${userHint}.`;
+  const userHint = `${address.slice(0, 6)}...${address.slice(-4)}`;
+
+  const system = [
+    "You are a marketing copywriter for Mining Hash, a Web3 mining ecosystem on the Base network.",
+    "Write ONE short promotional Tweet (well under 280 characters).",
+    "Structure it as: a short bold hook/headline, then a one-line mini description from the ecosystem facts, then a clear call-to-action to join the Galxe quest.",
+    `You MUST include the exact handle "${MANDATORY_HANDLE}" and hashtag "${MANDATORY_HASHTAG}" with no extra spaces.`,
+    "Add 1-2 relevant extra hashtags (e.g. #Web3 #Base #Mining #DeFi).",
+    `Always reference the Galxe quest link: ${GALXE_URL}.`,
+    `Rarely reference the faucet link: ${FAUCET_URL}, when it fits naturally.`,
+    "Keep it natural, friendly and crypto-enthusiastic. 1-2 emojis max.",
+    "Never invent links, addresses or token numbers not given here.",
+    "Plain text only: NO markdown, no asterisks, no asterisk-bold, no quotes around text.",
+    "Output ONLY the tweet text, no quotes, no commentary.",
+    `Budget check: the final text (with tags + link) must be under ${TWEET_MAX_LEN} characters.`,
+  ].join("\n");
+
+  const user = `Ecosystem facts:\n${PROJECT_KNOWLEDGE}\n\nTweak (personalisation seed): user ${userHint}. Generate the tweet now.`;
 
   const body = JSON.stringify({
     model: AI_MODEL,
     messages: [
-      {
-        role: "system",
-        content:
-          "You are a marketing copywriter for the Mining Hash Web3 project. Always keep @HashCoinFarm and #hashcoin exactly as provided. Never invent links.",
-      },
-      { role: "user", content: prompt },
+      { role: "system", content: system },
+      { role: "user", content: user },
     ],
-    temperature: 0.9,
-    max_tokens: 160,
+    temperature: 0.8,
+    max_tokens: 140,
   });
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), AI_TIMEOUT_MS);
 
   try {
     const resp = await fetch(AI_URL, {
@@ -84,22 +144,27 @@ async function generateWithAI(address) {
         Authorization: `Bearer ${AI_KEY}`,
       },
       body,
+      signal: controller.signal,
     });
+    clearTimeout(timer);
     if (!resp.ok) {
       console.error("AI generate HTTP", resp.status);
       return null;
     }
-    const data = await resp.json();
+    const raw = await resp.text();
+    if (!raw) return null;
+    let data;
+    try {
+      data = JSON.parse(raw);
+    } catch (parseErr) {
+      console.error("AI generate non-JSON response", parseErr.message, raw.slice(0, 200));
+      return null;
+    }
     const text = data?.choices?.[0]?.message?.content || "";
     if (!text) return null;
-
-    // Ensure mandatory tags are present; if the model changed the casing,
-    // re-append the canonical ones.
-    let tweet = text.trim();
-    if (!/@HashCoinFarm/.test(tweet)) tweet = `${tweet} @HashCoinFarm`;
-    if (!/#hashcoin/.test(tweet)) tweet = `${tweet} #hashcoin`;
-    return tweet;
+    return finalizeTweet(text);
   } catch (e) {
+    clearTimeout(timer);
     console.error("AI generate error", e.message);
     return null;
   }
@@ -110,55 +175,21 @@ function pickTemplate(address) {
   return TEMPLATES[idx];
 }
 
-// ===== Rate limiting =====
-function allow(key) {
-  const now = Date.now();
-  const rec = hits.get(key);
-  if (!rec || now - rec.ts > RATE_WINDOW_MS) {
-    hits.set(key, { count: 1, ts: now });
-    return true;
-  }
-  if (rec.count < RATE_LIMIT_REQ) {
-    rec.count += 1;
-    return true;
-  }
-  return false;
-}
-
 // ===== Shared request handler =====
-async function handle(reqBody, ip) {
+async function handle(reqBody) {
   const { userAddress } = reqBody || {};
   if (!userAddress) {
     return { status: 400, body: { error: "userAddress required" } };
   }
   const addr = userAddress.toLowerCase();
 
-  const key = addr + "|" + (ip || "");
-  if (!allow(key)) {
-    const hoursLeft = 12;
-    return {
-      status: 429,
-      body: { error: `Cooldown — try again in ~${hoursLeft}h` },
-    };
-  }
-
   const aiTweet = await generateWithAI(addr);
-  const tweet = aiTweet || pickTemplate(addr);
+  const tweet = aiTweet || finalizeTweet(pickTemplate(addr));
 
-  // Amplify: ensure mandatory tags and link are in the final string.
-  let finalTweet = tweet;
-  if (!finalTweet.includes("@HashCoinFarm")) {
-    finalTweet += " @HashCoinFarm";
-  }
-  if (!finalTweet.includes("#hashcoin")) {
-    finalTweet += " #hashcoin";
-  }
-  if (!finalTweet.includes(FAUCET_URL)) {
-    finalTweet += ` ${FAUCET_URL}`;
-  }
-  finalTweet = finalTweet.trim();
-
-  return { status: 200, body: { tweet: finalTweet, generatedBy: aiTweet ? "ai" : "template" } };
+  return {
+    status: 200,
+    body: { tweet, generatedBy: aiTweet ? "ai" : "template" },
+  };
 }
 
 // ===== Vercel serverless entry =====
@@ -167,12 +198,17 @@ export default async function handler(req, res) {
     res.setHeader("Allow", "POST");
     return res.status(405).json({ error: "Method not allowed" });
   }
-  const ip =
-    req.headers?.["x-forwarded-for"]?.split(",")[0]?.trim() ||
-    req.socket?.remoteAddress ||
-    "";
+  // Vercel body may arrive as a raw JSON string — normalise it.
+  let body = req.body;
+  if (typeof body === "string") {
+    try {
+      body = JSON.parse(body);
+    } catch (err) {
+      body = {};
+    }
+  }
   try {
-    const result = await handle(req.body || {}, ip);
+    const result = await handle(body || {});
     return res.status(result.status).json(result.body);
   } catch (error) {
     console.error("Unhandled error:", error);
@@ -196,8 +232,7 @@ if (isDirectRun) {
   app.use(express.json());
   app.post("/api/tweet", async (req, res) => {
     try {
-      const ip = req.ip || "";
-      const result = await handle(req.body || {}, ip);
+      const result = await handle(req.body || {});
       res.status(result.status).json(result.body);
     } catch (e) {
       res.status(500).json({ error: `Internal error: ${e.message}` });
