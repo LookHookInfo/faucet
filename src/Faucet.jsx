@@ -563,7 +563,7 @@ export default function Faucet({ client: clientProp }) {
               <img src="/logo.webp" alt="Mining Hash" />
             </div>
             <h1>Hash Faucet</h1>
-            <p>7 days access — Claim {parseReward(reward)} for every tweet about the project</p>
+            <p>+ 7 days of Claim for each tweet</p>
           </header>
 
           <div className="connect">
@@ -698,8 +698,7 @@ export default function Faucet({ client: clientProp }) {
 
       <footer>
         <div className="footer-inner">
-          <span>Mining Hash — engaging with rewards.</span>
-          <span>Leave your mark in the machine.</span>
+          <span>Mining Hash - engaging with rewards.</span>
         </div>
       </footer>
     </div>
